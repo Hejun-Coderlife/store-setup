@@ -206,7 +206,7 @@ function Invoke-StoreSetup {
     # 被人乱发就删掉机器人重加一个，换掉这里的地址。本机 feishu.txt 有地址就优先用它（测试用）
     $hook = $env:STORESETUP_HOOK
     if (-not $hook) { $hook = Read-Text (Join-Path $Dir 'feishu.txt') }
-    if (-not $hook) { $hook = 'https://open.feishu.cn/open-apis/bot/v2/hook/fbadd5c6-00fe-4b89-994b-af01e2bb686d' }
+    if (-not $hook) { $hook = 'https://open.feishu.cn/open-apis/bot/v2/hook/300fe773-a00d-48dd-9688-2c9c0865b11a' }   # 2026-10-14 换到企业「赫眉」下的群
 
     # ---------- 插着但没添加的 USB 小票机 ----------
     # 2026-10-14 实测：芯烨原装 XP-58IIH 不报型号（USBPRINT\UnknownPrinter），Windows 不会自己添加打印机，要程序来加。
