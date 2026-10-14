@@ -184,6 +184,39 @@ function Invoke-StoreSetup {
         return $false
     }
 
+    # 装着但桌面上没图标，店员会以为没装（2026-10-14 红联店的淘宝闪购）。按卸载记录找主程序（文件名 = 软件名去掉版本号，
+    # 如「淘宝闪购零售商家版 7.0.6」→ 淘宝闪购零售商家版.exe），公共桌面和当前用户桌面都没有指向它的快捷方式，就在公共桌面补一个
+    function Add-DesktopIcon($pattern) {
+        foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+                       'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+                       'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall') {
+            if (-not (Test-Path $k)) { continue }
+            foreach ($i in @(Get-ChildItem $k -ErrorAction SilentlyContinue)) {
+                $n = [string]$i.GetValue('DisplayName')
+                if ($n -notmatch $pattern) { continue }
+                $u = [string]$i.GetValue('UninstallString')
+                if ($u -match '^"([^"]+)"') { $u = $matches[1] }
+                $dir = Split-Path $u
+                $name = ($n -replace '\s+[\d\.]+$', '').Trim()
+                if (-not $dir) { continue }
+                $exe = Join-Path $dir "$name.exe"
+                if (-not (Test-Path $exe)) { continue }
+                $sh = New-Object -ComObject WScript.Shell
+                $public = Join-Path $env:PUBLIC 'Desktop'
+                foreach ($d in $public, [Environment]::GetFolderPath('Desktop')) {
+                    foreach ($l in @(Get-ChildItem $d -Filter *.lnk -ErrorAction SilentlyContinue)) {
+                        if ($sh.CreateShortcut($l.FullName).TargetPath -eq $exe) { return $false }
+                    }
+                }
+                $lnk = $sh.CreateShortcut((Join-Path $public "$name.lnk"))
+                $lnk.TargetPath = $exe; $lnk.WorkingDirectory = $dir; $lnk.Save()
+                Write-Log "  桌面上没有「$name」的图标，补了一个"
+                return $true
+            }
+        }
+        return $false
+    }
+
     # 芯烨官网驱动页上的 exe 下载链接（页面直接写在 HTML 里）；中文文件名要转义才能下载
     function Get-XprinterUrl($page, $pattern) {
         $wc = New-WebClient
@@ -463,6 +496,7 @@ function Invoke-StoreSetup {
     $items += @{
         Name = '美团外卖商家版'
         Check = { Test-AppFiles '美团外卖商家' }
+        Icon = '^美团外卖商家'
         Install = { Install-Exe 'https://e.waimai.meituan.com/gw/version/pc/download' 'meituan_setup.exe' '/S /allusers' }
     }
     # 淘宝闪购零售商家版（原饿了么零售商家版）：官方下载页 market.m.taobao.com/app/eleme_nr_bfe_retail/eb_download 读的 download.json。
@@ -471,6 +505,7 @@ function Invoke-StoreSetup {
     $items += @{
         Name = '淘宝闪购零售商家版'
         Check = { Test-AppFiles '淘宝闪购|饿了么|eleme' }
+        Icon = '^淘宝闪购'   # 只给新版补图标，旧的「饿了么零售商家版」不管
         Install = {
             $wc = New-WebClient
             $wc.Encoding = [Text.Encoding]::UTF8
@@ -628,6 +663,9 @@ public class StoreSetupWin {
                 # 比如 .NET 3.5：DISM 返回 3010，重启前注册表还查不到（2026-10-14 红联店）
                 elseif ($State.NeedReboot -and -not $rebootBefore) { $r.Status = '已补装'; $r.Detail = '重启后生效' }
                 else { $r.Status = '补装失败'; $r.Detail = '装完检查还是没有' }
+            }
+            if ($it.Icon -and ($r.Status -eq '已有' -or $r.Status -eq '已补装')) {
+                try { if (Add-DesktopIcon $it.Icon) { $r.Detail = '补了桌面图标' } } catch { }
             }
         } catch {
             $r.Status = '补装失败'; $r.Detail = Get-ShortError $_
