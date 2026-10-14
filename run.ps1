@@ -25,7 +25,7 @@ function Invoke-StoreSetup {
         $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($boot))
         Write-Host '需要管理员权限，正在重新打开（弹出的窗口请点「是」）...' -ForegroundColor Yellow
         Start-Process $exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $enc" -Verb RunAs
-        return
+        return 'relaunched'
     }
 
     foreach ($d in $Dir, $Cache, (Join-Path $Dir 'logs')) { if (-not (Test-Path $d)) { New-Item -ItemType Directory $d | Out-Null } }
@@ -529,6 +529,8 @@ function Invoke-StoreSetup {
     if ($State.NeedReboot) { Write-Host '有组件需要重启电脑才能生效，请找空闲时间重启。' -ForegroundColor Yellow }
 }
 
-try { Invoke-StoreSetup }
+# 交给管理员窗口之后这个窗口直接退出，不然店员看到「按回车关闭」会以为已经跑完了
+$relaunched = $false
+try { $relaunched = (Invoke-StoreSetup) -contains 'relaunched' }
 catch { Write-Host "出错了：$($_.Exception.Message)" -ForegroundColor Red }
-if ($env:STORESETUP_TEST -ne '1') { Read-Host '按回车关闭' | Out-Null }
+if (-not $relaunched -and $env:STORESETUP_TEST -ne '1') { Read-Host '按回车关闭' | Out-Null }

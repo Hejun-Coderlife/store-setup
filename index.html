@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>门店装机体检</title>
+<style>
+  body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; max-width: 760px; margin: 30px auto; padding: 0 16px; color: #222; line-height: 1.6; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  .sub { color: #666; margin-top: 0; }
+  #copy { display: block; width: 100%; font-size: 26px; padding: 18px; margin: 24px 0 8px; border: 0; border-radius: 10px; background: #1677ff; color: #fff; cursor: pointer; }
+  #copy.done { background: #389e0d; }
+  #tip { text-align: center; color: #389e0d; font-size: 18px; min-height: 28px; }
+  ol { font-size: 20px; padding-left: 28px; }
+  ol li { margin: 12px 0; }
+  kbd { border: 1px solid #aaa; border-bottom-width: 3px; border-radius: 5px; padding: 1px 8px; background: #f7f7f7; font-family: inherit; }
+  .note { background: #fffbe6; border: 1px solid #ffe58f; border-radius: 8px; padding: 10px 14px; font-size: 16px; }
+  textarea { width: 100%; height: 70px; font-size: 13px; font-family: Consolas, monospace; margin-top: 6px; box-sizing: border-box; }
+  .small { color: #888; font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>门店装机体检</h1>
+<p class="sub">检查这台电脑缺什么，缺了自动补装，装完生成体检报告。</p>
+
+<button id="copy">① 点这里复制命令</button>
+<div id="tip"></div>
+
+<ol>
+  <li>点上面的蓝色按钮，复制命令。</li>
+  <li>按键盘上的 <kbd>Win</kbd> + <kbd>R</kbd>（Win 是左下角有窗口图案的键），会弹出「运行」小窗口。</li>
+  <li>按 <kbd>Ctrl</kbd> + <kbd>V</kbd> 粘贴，再按 <kbd>回车</kbd>。</li>
+  <li>弹出「是否允许此应用对你的设备进行更改」，点 <b>是</b>。</li>
+  <li>按黑色窗口里的提示操作（第一次会问店名；插着小票机会问纸宽），然后等它跑完，<b>不要关窗口</b>。</li>
+</ol>
+
+<p class="note">要下载安装的东西比较多，第一次可能要 10～30 分钟。跑完窗口里会显示体检报告，看到「按回车关闭」就是好了。</p>
+
+<p class="small">按钮复制不了的话，手动选中下面整段文字，按 Ctrl+C 复制：</p>
+<textarea id="cmd" readonly>powershell -ep bypass -c "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);iex ((New-Object Net.WebClient).DownloadString('https://hejun-coderlife.github.io/store-setup/go.ps1'))"</textarea>
+
+<script>
+  var btn = document.getElementById('copy');
+  var box = document.getElementById('cmd');
+  var tip = document.getElementById('tip');
+  function ok() {
+    btn.className = 'done';
+    btn.innerHTML = '✓ 已复制，接着按 Win + R';
+    tip.innerHTML = '复制好了，按下面第 2 步继续';
+  }
+  function fallback() {
+    // 老浏览器、微信内置浏览器没有 navigator.clipboard，用选中再复制的老办法
+    box.focus(); box.select();
+    var done = false;
+    try { done = document.execCommand('copy'); } catch (e) { }
+    if (done) { ok(); } else { tip.innerHTML = '自动复制失败，请手动选中下面那段文字按 Ctrl+C'; }
+  }
+  btn.onclick = function () {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(box.value).then(ok, fallback);
+    } else { fallback(); }
+  };
+</script>
+</body>
+</html>

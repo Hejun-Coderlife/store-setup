@@ -1,7 +1,8 @@
-# 白名单：只发布门店要下载的文件，方案、测试、下载缓存都不进仓库
+﻿# 白名单：只发布门店要下载的文件，方案、测试、下载缓存都不进仓库
 *
 !.gitignore
 !.nojekyll
 !README.md
+!index.html
 !go.ps1
 !run.ps1

@@ -2,7 +2,7 @@
 
 一键检查门店电脑缺什么、缺了自动补装：VC++ 运行库、.NET、DirectX、WebView2、芯烨小票驱动、美团外卖商家版、淘宝闪购零售商家版；插着但没添加的 USB 小票机会自动添加。最后生成一份体检报告。
 
-在门店电脑上按 Win+R（或打开命令提示符），粘贴下面这一行回车：
+门店电脑上打开 https://hejun-coderlife.github.io/store-setup/ ，点「复制命令」，按 Win+R，Ctrl+V，回车。命令就是下面这一行：
 
 ```
 powershell -ep bypass -c "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);iex ((New-Object Net.WebClient).DownloadString('https://hejun-coderlife.github.io/store-setup/go.ps1'))"
