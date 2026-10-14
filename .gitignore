@@ -1,4 +1,4 @@
-﻿# 白名单：只发布门店要下载的文件，方案、测试、下载缓存都不进仓库
+# 白名单：只发布门店要下载的文件，方案、测试、下载缓存都不进仓库
 *
 !.gitignore
 !.nojekyll
@@ -6,3 +6,6 @@
 !index.html
 !go.ps1
 !run.ps1
+# 微软 VC++ 2005~2012 运行库镜像（门店连 download.microsoft.com 太慢），程序核对微软签名
+!redist/
+!redist/*.exe

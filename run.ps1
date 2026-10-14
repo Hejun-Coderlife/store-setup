@@ -83,12 +83,24 @@ function Invoke-StoreSetup {
         } finally { $r.Close() }
     }
 
-    function Get-Download($url, $file, $referer) {
+    # $url 可以给几个，按顺序试（Gitee 镜像在前、官网在后）；只给一个就重试一次。
+    # 给了 $signer 就核对数字签名（签名人要匹配），不对算这个地址失败、换下一个——镜像上的文件被换掉也装不进去
+    function Get-Download($url, $file, $referer, $signer) {
         $path = Join-Path $Cache $file
         Write-Log "  下载 $file ..."
-        for ($try = 1; ; $try++) {
-            try { Save-Url $url $path $referer; return $path }
-            catch { if ($try -ge 2) { throw }; Write-Log "  下载出错，重试一次（$(Get-ShortError $_)）" Yellow }
+        $urls = @($url); if ($urls.Count -eq 1) { $urls += $urls[0] }
+        for ($i = 0; $i -lt $urls.Count; $i++) {
+            try {
+                Save-Url $urls[$i] $path $referer
+                if ($signer) {
+                    $s = Get-AuthenticodeSignature $path
+                    if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch $signer) { throw "数字签名不对（$($s.Status)）" }
+                }
+                return $path
+            } catch {
+                if ($i -ge $urls.Count - 1) { throw }
+                Write-Log "  下载出错，重试（$(Get-ShortError $_)）" Yellow
+            }
         }
     }
 
@@ -121,8 +133,8 @@ function Invoke-StoreSetup {
     }
 
     # 0 成功；3010/1641 成功但要重启；1638 已经装了同版或更新的
-    function Install-Exe($url, $file, $arguments) {
-        $path = Get-Download $url $file
+    function Install-Exe($url, $file, $arguments, $signer) {
+        $path = Get-Download $url $file $null $signer
         Write-Log "  安装 $file ..."
         $code = Invoke-Wait $path $arguments 600
         if ($code -eq 3010 -or $code -eq 1641) { $State.NeedReboot = $true; return }
@@ -309,12 +321,18 @@ function Invoke-StoreSetup {
         @('2013', 'x86', 'https://aka.ms/highdpimfc2013x86enu', '/install /quiet /norestart', 'Visual C\+\+ 2013 Redistributable \(x86\)'),
         @('2013', 'x64', 'https://aka.ms/highdpimfc2013x64enu', '/install /quiet /norestart', 'Visual C\+\+ 2013 Redistributable \(x64\)')
     )
+    # download.microsoft.com 在国内解析到 Akamai 海外节点，门店没代理时极慢（2026-10-14 红联店 1.6KB/s）。
+    # 2005~2012 这 8 个文件（共 46MB，微软允许随软件分发）放了一份在本仓库 redist\，先从 Gitee 拿，再退回微软；
+    # 都核对微软签名。2013 的 aka.ms 跳到 download.visualstudio.microsoft.com，国内有节点，不用镜像
     foreach ($v in $vcOld) {
+        $vcFile = "vcredist_$($v[0])_$($v[1]).exe"
+        $vcUrl = $v[2]
+        if ($vcUrl -like 'https://download.microsoft.com/*') { $vcUrl = @("https://gitee.com/hejun202609/store-setup/raw/master/redist/$vcFile", $vcUrl) }
         $items += @{
-            Name = "VC++ $($v[0]) $($v[1])"; Url = $v[2]; Args = $v[3]; Pattern = $v[4]; Arch = $v[1]; File = "vcredist_$($v[0])_$($v[1]).exe"
+            Name = "VC++ $($v[0]) $($v[1])"; Url = $vcUrl; Args = $v[3]; Pattern = $v[4]; Arch = $v[1]; File = $vcFile
             Skip = { if ($it.Arch -eq 'x64' -and -not $is64) { '32位系统不需要' } }
             Check = { Test-Installed $it.Pattern }
-            Install = { Install-Exe $it.Url $it.File $it.Args }
+            Install = { Install-Exe $it.Url $it.File $it.Args 'Microsoft Corporation' }
         }
     }
 
