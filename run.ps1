@@ -94,7 +94,8 @@ function Invoke-StoreSetup {
                 Save-Url $urls[$i] $path $referer
                 if ($signer) {
                     $s = Get-AuthenticodeSignature $path
-                    if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch $signer) { throw "数字签名不对（$($s.Status)）" }
+                    if ($s.Status -ne 'Valid') { throw "文件的数字签名无效（$($s.Status)），可能被篡改" }
+                    if ($s.SignerCertificate.Subject -notmatch $signer) { throw "文件不是 $signer 签名的，可能被篡改" }
                 }
                 return $path
             } catch {
