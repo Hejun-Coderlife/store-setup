@@ -202,17 +202,11 @@ function Invoke-StoreSetup {
     }
     if (-not $store) { $store = $env:COMPUTERNAME }
 
-    $hookFile = Join-Path $Dir 'feishu.txt'
+    # 「门店电脑体检」群的机器人地址直接写在程序里（2026-10-14 用户定：店员不用粘贴）。仓库公开，谁都能往群里发消息；
+    # 被人乱发就删掉机器人重加一个，换掉这里的地址。本机 feishu.txt 有地址就优先用它（测试用）
     $hook = $env:STORESETUP_HOOK
-    if (-not $hook) { $hook = Read-Text $hookFile }
-    if (-not $hook -and -not $Test) {
-        Write-Host '这台电脑第一次运行：请粘贴「门店电脑体检」飞书群机器人地址（直接回车跳过，报告只存在本机）' -ForegroundColor Yellow
-        $h = (Read-Host '地址').Trim()
-        if ($h -match '^https://open\.feishu\.cn/open-apis/bot/v2/hook/') {
-            $hook = $h
-            [IO.File]::WriteAllText($hookFile, $hook, [Text.Encoding]::UTF8)
-        } elseif ($h) { Write-Log '地址不对（应以 https://open.feishu.cn/open-apis/bot/v2/hook/ 开头），这次不发群，下次运行会再问' Yellow }
-    }
+    if (-not $hook) { $hook = Read-Text (Join-Path $Dir 'feishu.txt') }
+    if (-not $hook) { $hook = 'https://open.feishu.cn/open-apis/bot/v2/hook/fbadd5c6-00fe-4b89-994b-af01e2bb686d' }
 
     # ---------- 插着但没添加的 USB 小票机 ----------
     # 2026-10-14 实测：芯烨原装 XP-58IIH 不报型号（USBPRINT\UnknownPrinter），Windows 不会自己添加打印机，要程序来加。
