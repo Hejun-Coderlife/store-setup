@@ -54,11 +54,42 @@ function Invoke-StoreSetup {
         return $wc
     }
 
+    # 不用 WebClient.DownloadFile：它断网后要等 5 分钟才超时，中间什么都不显示，看着像死了（2026-10-14 红联店卡在 VC++ 2012 x64）。
+    # 自己读：连服务器等 30 秒，读数据 60 秒没进展算超时，失败重试一次；每 5 秒显示一次进度
+    function Save-Url($url, $path, $referer) {
+        $q = [Net.HttpWebRequest]::Create($url)
+        $q.UserAgent = $UA
+        if ($referer) { $q.Referer = $referer }
+        $q.Timeout = 30000
+        $q.ReadWriteTimeout = 60000
+        $r = $q.GetResponse()
+        try {
+            $total = $r.ContentLength
+            $in = $r.GetResponseStream()
+            $out = [IO.File]::Create($path)
+            $done = 0
+            try {
+                $buf = New-Object byte[] 65536
+                $tick = [DateTime]::Now
+                while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) {
+                    $out.Write($buf, 0, $n); $done += $n
+                    if (([DateTime]::Now - $tick).TotalSeconds -ge 5) {
+                        $tick = [DateTime]::Now
+                        if ($total -gt 0) { Write-Host ('    已下载 {0:N1} / {1:N1} MB' -f ($done / 1MB), ($total / 1MB)) } else { Write-Host ('    已下载 {0:N1} MB' -f ($done / 1MB)) }
+                    }
+                }
+            } finally { $out.Close(); $in.Close() }
+            if ($total -gt 0 -and $done -lt $total) { throw '下载不完整（网络中断）' }
+        } finally { $r.Close() }
+    }
+
     function Get-Download($url, $file, $referer) {
         $path = Join-Path $Cache $file
         Write-Log "  下载 $file ..."
-        (New-WebClient $referer).DownloadFile($url, $path)
-        return $path
+        for ($try = 1; ; $try++) {
+            try { Save-Url $url $path $referer; return $path }
+            catch { if ($try -ge 2) { throw }; Write-Log "  下载出错，重试一次（$(Get-ShortError $_)）" Yellow }
+        }
     }
 
     # 报告里的失败原因要短、要中文，飞书群里看得懂
