@@ -196,10 +196,42 @@ function Invoke-StoreSetup {
     $store = $env:STORESETUP_STORE
     if (-not $store) { $store = Read-Text 'C:\ProgramData\LoginWatch\store.txt' }   # 外卖监控装过就用它的店名
     if (-not $store) { $store = Read-Text (Join-Path $Dir 'store.txt') }
+
+    # 外卖监控没装的话后面要装，它的店名必须和营业时间表一字不差（汇总服务按表核对开门时间）→ 从表里选，不让手打
+    $lwInstalled = (Test-Path 'C:\ProgramData\LoginWatch\monitor.ps1') -and (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LoginWatch')
+    $lwStore = $null
+    if (-not $lwInstalled) {
+        $names = @()
+        try {
+            $wc = New-WebClient
+            $hours = [Text.Encoding]::UTF8.GetString($wc.DownloadData('https://gitee.com/hejun202609/login-watch/raw/master/' + [Uri]::EscapeDataString('营业时间.txt')))
+            foreach ($line in ($hours -split "`r?`n")) {   # 同 login-watch 的 hours.ps1 Get-StoreNames
+                $line = $line.Trim()
+                if (-not $line -or $line.StartsWith('#') -or $line.EndsWith('测试')) { continue }
+                if ($line -match '^(\S+)\s+\d{1,2}[:：]\d{2}' -and $matches[1] -ne '默认') { $names += $matches[1] }
+            }
+        } catch { Write-Log "拿不到门店列表（$(Get-ShortError $_)），这次不装外卖监控" Yellow }
+        if ($names -contains $store) { $lwStore = $store }
+        elseif ($Test) { $lwStore = $env:STORESETUP_LWSTORE }
+        elseif ($names.Count) {
+            Write-Host ''
+            for ($i = 0; $i -lt $names.Count; $i++) { Write-Host ('{0,3}. {1}' -f ($i + 1), $names[$i]) }
+            while (-not $lwStore) {
+                $a = (Read-Host '这台电脑是哪家店？输入上面的编号，或者店名里的几个字').Trim()
+                $hits = @()
+                if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $names.Count) { $hits = @($names[[int]$a - 1]) }
+                elseif ($a) { $hits = @($names | Where-Object { $_.Contains($a) }) }
+                if ($hits.Count -eq 1) { $lwStore = $hits[0] }
+                elseif ($hits.Count -gt 1) { Write-Host ('有好几家：' + ($hits -join '、') + '，请输入编号') -ForegroundColor Yellow }
+                else { Write-Host '没找到，请再输一次' -ForegroundColor Yellow }
+            }
+        }
+        if ($lwStore) { $store = $lwStore }
+    }
     if (-not $store -and -not $Test) {
         $store = (Read-Host '请输入店名（直接回车用电脑名）').Trim()
-        if ($store) { [IO.File]::WriteAllText((Join-Path $Dir 'store.txt'), $store, [Text.Encoding]::UTF8) }
     }
+    if ($store -and $store -ne (Read-Text (Join-Path $Dir 'store.txt'))) { [IO.File]::WriteAllText((Join-Path $Dir 'store.txt'), $store, [Text.Encoding]::UTF8) }
     if (-not $store) { $store = $env:COMPUTERNAME }
 
     # 「门店电脑体检」群的机器人地址直接写在程序里（2026-10-14 用户定：店员不用粘贴）。仓库公开，谁都能往群里发消息；
@@ -399,6 +431,132 @@ function Invoke-StoreSetup {
             $d = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='D:'" -ErrorAction SilentlyContinue
             if ($d -and $d.DriveType -eq 3) { $dir = 'D:\淘宝闪购零售商家版' }
             Install-Exe $url 'eleme_retail_setup.exe' "/S /allusers /D=$dir"
+        }
+    }
+
+    # 美得得 ERP（2026-10-14 用户要求加，官网 erp.meidd.com 的下载按钮）。Setup Factory 9 做的安装包，/S 不管用，只能走向导：
+    # 沙盒实测一路回车 5 步装完（欢迎、位置、快捷方式、确认、完成），装到 D:\美得得美妆连锁ERP系统（写死 D 盘，
+    # 没 D 盘就弹「没有足够的自由空间」死循环）→ 没 D 盘不装。只在有「下一步」「完成」按钮时按回车，进度页不按（怕按到取消）
+    $items += @{
+        Name = '美得得ERP'
+        Check = {
+            foreach ($k in 'HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall') {
+                if (-not (Test-Path $k)) { continue }
+                foreach ($i in @(Get-ChildItem $k -ErrorAction SilentlyContinue)) {
+                    if (-not ([string]$i.GetValue('DisplayName') -match '美得得')) { continue }
+                    $loc = [string]$i.GetValue('InstallLocation')
+                    if ($loc -and (Test-Path $loc) -and @(Get-ChildItem $loc -Filter *.exe -ErrorAction SilentlyContinue).Count) { return $true }
+                }
+            }
+            return $false
+        }
+        Install = {
+            $d = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='D:'" -ErrorAction SilentlyContinue
+            if (-not $d -or $d.DriveType -ne 3) { throw '这台电脑没有 D 盘，美得得只能装 D 盘，请手动装' }
+            $exe = Get-Download 'https://erp.meidd.com/COSXE3/COS_WXD.exe' 'meidd_setup.exe'
+            if (-not ('StoreSetupWin' -as [type])) {
+                Add-Type @'
+using System; using System.Text; using System.Runtime.InteropServices; using System.Collections.Generic;
+public class StoreSetupWin {
+    delegate bool EP(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EP f, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, EP f, IntPtr l);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    // 进程所有可见窗口及其可用控件的文字，用 | 连起来
+    public static string Texts(uint pid) {
+        List<string> r = new List<string>();
+        EnumWindows(delegate(IntPtr h, IntPtr l) {
+            uint q; GetWindowThreadProcessId(h, out q);
+            if (q != pid || !IsWindowVisible(h)) return true;
+            StringBuilder t = new StringBuilder(512); GetWindowText(h, t, 512); r.Add(t.ToString());
+            EnumChildWindows(h, delegate(IntPtr c, IntPtr l2) {
+                if (IsWindowVisible(c) && IsWindowEnabled(c)) { StringBuilder s = new StringBuilder(512); GetWindowText(c, s, 512); if (s.Length > 0) r.Add(s.ToString()); }
+                return true;
+            }, IntPtr.Zero);
+            return true;
+        }, IntPtr.Zero);
+        return string.Join("|", r.ToArray());
+    }
+}
+'@
+            }
+            Write-Log '  安装美得得（自动点「下一步」，这一分钟请别动键盘鼠标）...'
+            $sh = New-Object -ComObject WScript.Shell
+            $null = Start-Process $exe -PassThru
+            $seen = $false
+            for ($i = 0; $i -lt 100; $i++) {
+                Start-Sleep 3
+                $ir = @(Get-Process irsetup -ErrorAction SilentlyContinue)
+                if ($ir.Count -eq 0) { if ($seen) { break } else { continue } }
+                $seen = $true
+                $t = [StoreSetupWin]::Texts([uint32]$ir[0].Id)
+                if ($t -match '警告|自由空间') { $ir | Stop-Process -Force; throw '美得得安装程序报磁盘空间不够' }
+                if ($t -match '下一步|完成') { $null = $sh.AppActivate($ir[0].Id); Start-Sleep 1; $sh.SendKeys('{ENTER}') }
+            }
+            $left = @(Get-Process irsetup -ErrorAction SilentlyContinue)
+            if ($left.Count) { $left | Stop-Process -Force; throw '美得得安装向导 5 分钟没走完，已关掉' }
+        }
+    }
+
+    # 赫眉外卖监控（2026-10-14 用户要求加）：文件从公开仓库 gitee login-watch 拿（和门店自动更新同一份清单 files.txt，
+    # 群地址也在里面），再调它的 install.ps1 -Store 店名 静默装。店名开头已从营业时间表选好（$lwStore）
+    $items += @{
+        Name = '赫眉外卖监控'
+        Check = { (Test-Path 'C:\ProgramData\LoginWatch\monitor.ps1') -and (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\LoginWatch') }
+        Install = {
+            if (-not $lwStore) { throw '没选店名（下次运行从列表里选）' }
+            $wc = New-WebClient
+            # Gitee 按分支名下载有几分钟 CDN 缓存，按提交号下载才不会新旧文件混着拿
+            $ref = 'master'
+            try { if ($wc.DownloadString('https://gitee.com/api/v5/repos/hejun202609/login-watch/branches/master') -match '"sha"\s*:\s*"([0-9a-f]{40})"') { $ref = $matches[1] } } catch { }
+            $base = "https://gitee.com/hejun202609/login-watch/raw/$ref/"
+            $list = @()
+            foreach ($l in ([Text.Encoding]::UTF8.GetString($wc.DownloadData($base + 'files.txt')) -split "`r?`n")) {
+                $l = $l.Trim()
+                if ($l -and -not $l.StartsWith('#')) { $list += $l }
+            }
+            if ($list -notcontains 'install.ps1') { throw '外卖监控的文件清单不对（可能改版了）' }
+            $stage = Join-Path $Cache 'loginwatch'
+            if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+            Write-Log "  下载外卖监控（$($list.Count) 个文件）..."
+            foreach ($p in $list + 'files.txt' + 'version.txt') {
+                $to = Join-Path $stage ($p -replace '/', '\')
+                $parent = Split-Path $to
+                if (-not (Test-Path $parent)) { New-Item -ItemType Directory $parent | Out-Null }
+                $parts = @(); foreach ($s in ($p -split '/')) { $parts += [Uri]::EscapeDataString($s) }
+                [IO.File]::WriteAllBytes($to, $wc.DownloadData($base + ($parts -join '/')))
+            }
+            Write-Log "  安装外卖监控（$lwStore）..."
+            $code = Invoke-Wait "$PSHOME\powershell.exe" "-NoProfile -ExecutionPolicy Bypass -File `"$stage\install.ps1`" -Store `"$lwStore`"" 300
+            if ($code -ne 0) { throw "外卖监控安装脚本返回 $code" }
+        }
+    }
+
+    # WPS（2026-10-14 用户要求加；沙盒验证 /S -agreelicense 22 秒静默装完，装完会自己弹一个「新版本介绍」窗口）。
+    # 装在当前用户名下（%LOCALAPPDATA%\Kingsoft，卸载记录在 HKCU），门店一般只有一个账号，没问题。
+    # 官网下载按钮是 JS 拼的，没有固定「最新版」链接；旧版安装包一直留在服务器上，装上后 WPS 会自己升级 →
+    # 写死一个版本号就行（版本号见 winget-pkgs 的 Kingsoft.WPSOffice.CN）
+    $items += @{
+        Name = 'WPS Office'
+        Check = { Test-AppFiles '^WPS Office' }
+        Install = { Install-Exe 'https://official-package.wpscdn.cn/wps/download/WPS_Setup_29161.exe' 'WPS_Setup.exe' '/S -agreelicense' }
+    }
+
+    # Edge：Win10/11 自带，被卸掉了才装。微软企业版 MSI 固定链接，下到的总是最新稳定版。Win7 最后支持的是 109，不装
+    $items += @{
+        Name = 'Edge 浏览器'
+        Skip = { if ($build -lt 10240) { 'Win7/8 不支持新版 Edge' } }
+        Check = { (Test-Path "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") -or ($is64 -and (Test-Path "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe")) }
+        Install = {
+            $id = '2093505'; if ($is64) { $id = '2093437' }
+            $msi = Get-Download "https://go.microsoft.com/fwlink/?LinkID=$id" 'MicrosoftEdgeEnterprise.msi'
+            Write-Log '  安装 Edge ...'
+            $code = Invoke-Wait "$env:SystemRoot\System32\msiexec.exe" "/i `"$msi`" /qn /norestart" 900
+            if ($code -eq 3010 -or $code -eq 1641) { $State.NeedReboot = $true }
+            elseif ($code -ne 0 -and $code -ne 1638) { throw "Edge 安装返回 $code" }
         }
     }
 
