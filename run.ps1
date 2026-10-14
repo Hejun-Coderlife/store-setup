@@ -622,8 +622,12 @@ public class StoreSetupWin {
             elseif ($it.NoAuto) { $r.Status = '没装'; $r.Detail = '请手动装' }
             else {
                 Write-Log "缺 $($it.Name)，开始补装" Yellow
+                $rebootBefore = $State.NeedReboot
                 & $it.Install
-                if (& $it.Check) { $r.Status = '已补装' } else { $r.Status = '补装失败'; $r.Detail = '装完检查还是没有' }
+                if (& $it.Check) { $r.Status = '已补装' }
+                # 比如 .NET 3.5：DISM 返回 3010，重启前注册表还查不到（2026-10-14 红联店）
+                elseif ($State.NeedReboot -and -not $rebootBefore) { $r.Status = '已补装'; $r.Detail = '重启后生效' }
+                else { $r.Status = '补装失败'; $r.Detail = '装完检查还是没有' }
             }
         } catch {
             $r.Status = '补装失败'; $r.Detail = Get-ShortError $_
