@@ -464,10 +464,17 @@ function Invoke-StoreSetup {
     }
 
     # ---------- 打印机（用来攒各店型号清单） ----------
+    # 小票机多半不报型号，Windows 叫它「No Printer Attached」，看着像没插 → 报告里写「型号不明」，再写这个口添加成了哪台打印机
+    $portOwner = @{}
+    foreach ($pr in @(Get-WmiObject Win32_Printer -ErrorAction SilentlyContinue)) { $portOwner[[string]$pr.PortName] = [string]$pr.Name }
     $usb = @()
     foreach ($e in $usbDevices) {
-        $id = ($e.PNPDeviceID -split '\\')[0..1] -join '\'
-        $usb += "$($e.Name) [$id]"
+        $hw = ($e.PNPDeviceID -split '\\')[1]
+        $t = "$($e.Name) [$hw]"
+        if ($hw -eq 'UNKNOWNPRINTER') { $t = '型号不明' }
+        $port = '端口不明'; if ($e.PNPDeviceID -match '(USB\d{3})$') { $port = $matches[1] }
+        if ($portOwner[$port]) { $t += "，$port，已添加为「$($portOwner[$port])」" } else { $t += "，$port，没添加打印机" }
+        $usb += $t
     }
     $printers = @()
     foreach ($pr in @(Get-WmiObject Win32_Printer -ErrorAction SilentlyContinue)) {
@@ -493,7 +500,7 @@ function Invoke-StoreSetup {
     $okCount = 0; if ($groups['已有']) { $okCount = $groups['已有'].Count }
     $lines += "已有：$okCount 项"
     if ($State.NeedReboot) { $lines += '⚠ 需要重启电脑才能生效' }
-    $u = '无'; if ($usb.Count) { $u = $usb -join '；' }
+    $u = '无'; if ($usb.Count) { $u = "$($usb.Count) 台：" + ($usb -join '；') }
     $lines += "USB 打印机：$u"
     if ($added.Count) { $lines += '新加打印机：' + ($added -join '；') }
     $pp = '无'; if ($printers.Count) { $pp = $printers -join '；' }
