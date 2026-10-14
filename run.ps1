@@ -19,7 +19,8 @@ function Invoke-StoreSetup {
     $isAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     $isWow = ([IntPtr]::Size -eq 4) -and (Test-Path "$env:SystemRoot\SysNative")
     if (-not $isAdmin -or $isWow) {
-        $boot = "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);iex ((New-Object Net.WebClient).DownloadString('https://hejun-coderlife.github.io/store-setup/go.ps1'))"
+        # GitHub 打不开的门店用的是 Gitee 那行命令，这里也要能退到 Gitee
+        $boot = "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);`$w=New-Object Net.WebClient;try{`$s=`$w.DownloadString('https://hejun-coderlife.github.io/store-setup/go.ps1')}catch{`$s=`$w.DownloadString('https://gitee.com/hejun202609/store-setup/raw/master/go.ps1')};iex `$s"
         $exe = 'powershell.exe'
         if ($isWow) { $exe = "$env:SystemRoot\SysNative\WindowsPowerShell\v1.0\powershell.exe" }
         $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($boot))

@@ -8,4 +8,10 @@
 powershell -ep bypass -c "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);iex ((New-Object Net.WebClient).DownloadString('https://hejun-coderlife.github.io/store-setup/go.ps1'))"
 ```
 
+**打不开 GitHub 的电脑**用这一行（从 Gitee 下载，用法一样：Win+R，粘贴，回车）：
+
+```
+powershell -ep bypass -c "[Net.ServicePointManager]::SecurityProtocol=[Enum]::ToObject([Net.SecurityProtocolType],3072);iex ((New-Object Net.WebClient).DownloadString('https://gitee.com/hejun202609/store-setup/raw/master/go.ps1'))"
+```
+
 支持 Windows 7 SP1 及以上。只补装、不卸载，已经装好的不动。
