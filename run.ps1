@@ -7,7 +7,7 @@
 
 function Invoke-StoreSetup {
     $ErrorActionPreference = 'Stop'
-    $Version = '2026.10.14'
+    $Version = '2026.10.27'
     $Dir = 'C:\ProgramData\StoreSetup'
     $Cache = Join-Path $env:TEMP 'StoreSetup'
     $Test = $env:STORESETUP_TEST -eq '1'
@@ -56,6 +56,7 @@ function Invoke-StoreSetup {
 
     # 不用 WebClient.DownloadFile：它断网后要等 5 分钟才超时，中间什么都不显示，看着像死了（2026-10-14 红联店卡在 VC++ 2012 x64）。
     # 自己读：连服务器等 30 秒，读数据 60 秒没进展算超时，失败重试一次；每 5 秒显示一次进度
+    # 50 MB 以上、服务器支持分段的，分 16 段同时下：WPS 的服务器每条连接限速约 100 KB/s，一条连接下 294 MB 要 50 分钟（2026-10-27）
     function Save-Url($url, $path, $referer) {
         $q = [Net.HttpWebRequest]::Create($url)
         $q.UserAgent = $UA
@@ -63,8 +64,14 @@ function Invoke-StoreSetup {
         $q.Timeout = 30000
         $q.ReadWriteTimeout = 60000
         $r = $q.GetResponse()
+        $total = $r.ContentLength
+        if ($total -gt 50MB -and $total -lt 2GB -and $r.Headers['Accept-Ranges'] -eq 'bytes') {
+            $final = $r.ResponseUri.AbsoluteUri   # 跳转过的话用跳转后的地址
+            $q.Abort(); $r.Close()
+            Save-UrlParts $final $path $referer $total
+            return
+        }
         try {
-            $total = $r.ContentLength
             $in = $r.GetResponseStream()
             $out = [IO.File]::Create($path)
             $done = 0
@@ -81,6 +88,85 @@ function Invoke-StoreSetup {
             } finally { $out.Close(); $in.Close() }
             if ($total -gt 0 -and $done -lt $total) { throw '下载不完整（网络中断）' }
         } finally { $r.Close() }
+    }
+
+    # 分段下载：每段一个 runspace（PS2 也有），各写一个 .partN 文件，断了从断点续，每段最多试 3 次；全下完再按顺序拼起来
+    function Save-UrlParts($url, $path, $referer, $total) {
+        $count = 16
+        $size = [long][Math]::Ceiling($total / $count)
+        if ([Net.ServicePointManager]::DefaultConnectionLimit -lt 16) { [Net.ServicePointManager]::DefaultConnectionLimit = 16 }   # 默认同一网站只开 2 条连接
+        $worker = {
+            param($url, $file, $from, $to, $ua, $referer)
+            $err = ''
+            for ($try = 0; $try -lt 3; $try++) {
+                $have = [long]0
+                if (Test-Path $file) { $have = (New-Object IO.FileInfo($file)).Length }
+                if ($have -ge $to - $from + 1) { return '' }
+                try {
+                    $q = [Net.HttpWebRequest]::Create($url)
+                    $q.UserAgent = $ua
+                    if ($referer) { $q.Referer = $referer }
+                    $q.Timeout = 30000
+                    $q.ReadWriteTimeout = 60000
+                    $q.AddRange([int]($from + $have), [int]$to)   # .NET 3.5 只有 int 版本，文件小于 2 GB 才走这里
+                    $r = $q.GetResponse()
+                    try {
+                        if ([int]$r.StatusCode -ne 206) { throw '服务器不支持分段下载' }
+                        $in = $r.GetResponseStream()
+                        $out = New-Object IO.FileStream($file, [IO.FileMode]::Append)
+                        try {
+                            $buf = New-Object byte[] 65536
+                            while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) { $out.Write($buf, 0, $n) }
+                        } finally { $out.Close(); $in.Close() }
+                    } finally { $r.Close() }
+                } catch { $err = $_.Exception.Message }
+            }
+            if ((New-Object IO.FileInfo($file)).Length -ge $to - $from + 1) { return '' }
+            return $err
+        }
+        $pool = [RunspaceFactory]::CreateRunspacePool(1, $count)
+        $pool.Open()
+        $jobs = @()
+        try {
+            for ($i = 0; $i -lt $count; $i++) {
+                $from = $i * $size
+                $to = [Math]::Min($total, $from + $size) - 1
+                $file = "$path.part$i"
+                if (Test-Path $file) { Remove-Item $file -Force }
+                $ps = [PowerShell]::Create()
+                $ps.RunspacePool = $pool
+                [void]$ps.AddScript($worker).AddArgument($url).AddArgument($file).AddArgument($from).AddArgument($to).AddArgument($UA).AddArgument($referer)
+                $jobs += New-Object PSObject -Property @{ PS = $ps; Handle = $ps.BeginInvoke(); File = $file }
+            }
+            do {
+                Start-Sleep -Seconds 5
+                $done = [long]0
+                $left = 0
+                foreach ($j in $jobs) {
+                    if (Test-Path $j.File) { $done += (New-Object IO.FileInfo($j.File)).Length }
+                    if (-not $j.Handle.IsCompleted) { $left++ }
+                }
+                Write-Host ('    已下载 {0:N1} / {1:N1} MB（分 {2} 段同时下）' -f ($done / 1MB), ($total / 1MB), $count)
+            } while ($left -gt 0)
+            foreach ($j in $jobs) {
+                $e = "$($j.PS.EndInvoke($j.Handle))"
+                if ($e) { throw "分段下载失败：$e" }
+            }
+            $out = [IO.File]::Create($path)
+            try {
+                foreach ($j in $jobs) {
+                    $in = [IO.File]::OpenRead($j.File)
+                    try {
+                        $buf = New-Object byte[] 1048576
+                        while (($n = $in.Read($buf, 0, $buf.Length)) -gt 0) { $out.Write($buf, 0, $n) }
+                    } finally { $in.Close() }
+                }
+            } finally { $out.Close() }
+            if ((New-Object IO.FileInfo($path)).Length -ne $total) { throw '下载不完整（拼起来大小不对）' }
+        } finally {
+            foreach ($j in $jobs) { $j.PS.Dispose(); Remove-Item $j.File -Force -ErrorAction SilentlyContinue }
+            $pool.Close()
+        }
     }
 
     # $url 可以给几个，按顺序试（Gitee 镜像在前、官网在后）；只给一个就重试一次。
