@@ -716,6 +716,17 @@ public class StoreSetupWin {
         Install = { Install-Exe 'https://official-package.wpscdn.cn/wps/download/WPS_Setup_29161.exe' 'WPS_Setup.exe' '/S -agreelicense' }
     }
 
+    # 解压（Unpack，用户自己做的，github.com/Hejun-Coderlife/mac-unpack，2026-10-29 用户要求加）。Inno Setup 打包、PrivilegesRequired=lowest：
+    # 提权运行也照样装给当前用户（%LOCALAPPDATA%\Programs\Unpack，卸载记录在 HKCU），和 WPS 一样门店一个账号没问题。
+    # /VERYSILENT 时不自动打开、不跳默认应用设置页。.NET 8 自包含 x64 → Win7/8 和 32 位跳过。没有代码签名，不核对签名。
+    # releases/latest 总是拿最新版，装上后软件自己会提示更新
+    $items += @{
+        Name = '解压'
+        Skip = { if ($build -lt 10240) { 'Win7/8 不支持（要 Win10 以上）' } elseif (-not $is64) { '只有 64 位版本' } }
+        Check = { (Test-Installed '^解压$') -and (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\Unpack\解压.exe')) }
+        Install = { Install-Exe 'https://github.com/Hejun-Coderlife/mac-unpack/releases/latest/download/Unpack-Setup.exe' 'Unpack-Setup.exe' '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' }
+    }
+
     # Edge：Win10/11 自带，被卸掉了才装。微软企业版 MSI 固定链接，下到的总是最新稳定版。Win7 最后支持的是 109，不装
     $items += @{
         Name = 'Edge 浏览器'
