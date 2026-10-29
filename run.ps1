@@ -178,7 +178,12 @@ function Invoke-StoreSetup {
         for ($i = 0; $i -lt $urls.Count; $i++) {
             try {
                 Save-Url $urls[$i] $path $referer
-                if ($signer) {
+                if ($signer -like 'sha256:*') {   # 没有数字签名的（解压）核对文件指纹；镜像的文件不对就换下一个地址
+                    $sha = [Security.Cryptography.SHA256]::Create()
+                    $fs = [IO.File]::OpenRead($path)
+                    try { $h = -join @($sha.ComputeHash($fs) | ForEach-Object { $_.ToString('x2') }) } finally { $fs.Close() }
+                    if ("sha256:$h" -ne $signer) { throw '文件指纹不对，可能被篡改或没下完整' }
+                } elseif ($signer) {
                     $s = Get-AuthenticodeSignature $path
                     if ($s.Status -ne 'Valid') { throw "文件的数字签名无效（$($s.Status)），可能被篡改" }
                     if ($s.SignerCertificate.Subject -notmatch $signer) { throw "文件不是 $signer 签名的，可能被篡改" }
@@ -718,13 +723,17 @@ public class StoreSetupWin {
 
     # 解压（Unpack，用户自己做的，github.com/Hejun-Coderlife/mac-unpack，2026-10-29 用户要求加）。Inno Setup 打包、PrivilegesRequired=lowest：
     # 提权运行也照样装给当前用户（%LOCALAPPDATA%\Programs\Unpack，卸载记录在 HKCU），和 WPS 一样门店一个账号没问题。
-    # /VERYSILENT 时不自动打开、不跳默认应用设置页。.NET 8 自包含 x64 → Win7/8 和 32 位跳过。没有代码签名，不核对签名。
-    # releases/latest 总是拿最新版，装上后软件自己会提示更新
+    # /VERYSILENT 时不自动打开、不跳默认应用设置页。.NET 8 自包含 x64 → Win7/8 和 32 位跳过。
+    # 门店连 GitHub 慢 → 先从 Gitee 镜像下（store-setup 仓库的发行版 unpack-v1.1，附件不支持分段，单条下），不行再 GitHub。
+    # 没有代码签名，核对 SHA256（GitHub 发行版页面上的 digest）。两边都钉在同一版，装上后软件自己提示更新；
+    # 想让新装的店直接装新版：Gitee 建新发行版传附件，改下面的版本号和指纹
+    $unpackTag = 'v1.1'; $unpackSha = 'sha256:de1ce726269a75e8b2b1e97f267cd5ff3768cb0af0b48db670358ec21f634ffd'
     $items += @{
         Name = '解压'
         Skip = { if ($build -lt 10240) { 'Win7/8 不支持（要 Win10 以上）' } elseif (-not $is64) { '只有 64 位版本' } }
         Check = { (Test-Installed '^解压$') -and (Test-Path (Join-Path $env:LOCALAPPDATA 'Programs\Unpack\解压.exe')) }
-        Install = { Install-Exe 'https://github.com/Hejun-Coderlife/mac-unpack/releases/latest/download/Unpack-Setup.exe' 'Unpack-Setup.exe' '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' }
+        Install = { Install-Exe @("https://gitee.com/hejun202609/store-setup/releases/download/unpack-$unpackTag/Unpack-Setup.exe",
+                                  "https://github.com/Hejun-Coderlife/mac-unpack/releases/download/$unpackTag/Unpack-Setup.exe") 'Unpack-Setup.exe' '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' $unpackSha }
     }
 
     # Edge：Win10/11 自带，被卸掉了才装。微软企业版 MSI 固定链接，下到的总是最新稳定版。Win7 最后支持的是 109，不装
