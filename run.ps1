@@ -7,7 +7,7 @@
 
 function Invoke-StoreSetup {
     $ErrorActionPreference = 'Stop'
-    $Version = '2026.10.27'
+    $Version = '2026.11.03'
     $Dir = 'C:\ProgramData\StoreSetup'
     $Cache = Join-Path $env:TEMP 'StoreSetup'
     $Test = $env:STORESETUP_TEST -eq '1'
@@ -763,11 +763,13 @@ public class StoreSetupWin {
             elseif ($it.NoAuto) { $r.Status = '没装'; $r.Detail = '请手动装' }
             else {
                 Write-Log "缺 $($it.Name)，开始补装" Yellow
+                # 每项单独看自己要不要重启：前面的 VC++ 要重启，后面 .NET 4.8.1 也返回 3010，原来被算成失败（2026-11-03 横峰店）
                 $rebootBefore = $State.NeedReboot
-                & $it.Install
+                $State.NeedReboot = $false
+                try { & $it.Install } finally { $itemReboot = $State.NeedReboot; if ($rebootBefore) { $State.NeedReboot = $true } }
                 if (& $it.Check) { $r.Status = '已补装' }
                 # 比如 .NET 3.5：DISM 返回 3010，重启前注册表还查不到（2026-10-14 红联店）
-                elseif ($State.NeedReboot -and -not $rebootBefore) { $r.Status = '已补装'; $r.Detail = '重启后生效' }
+                elseif ($itemReboot) { $r.Status = '已补装'; $r.Detail = '重启后生效' }
                 else { $r.Status = '补装失败'; $r.Detail = '装完检查还是没有' }
             }
             if ($it.Icon -and ($r.Status -eq '已有' -or $r.Status -eq '已补装')) {
