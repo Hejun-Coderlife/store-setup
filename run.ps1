@@ -7,7 +7,7 @@
 
 function Invoke-StoreSetup {
     $ErrorActionPreference = 'Stop'
-    $Version = '2026.11.03'
+    $Version = '2026.11.04'
     $Dir = 'C:\ProgramData\StoreSetup'
     $Cache = Join-Path $env:TEMP 'StoreSetup'
     $Test = $env:STORESETUP_TEST -eq '1'
@@ -334,8 +334,10 @@ function Invoke-StoreSetup {
         $st.Open('ReadWrite')
         try { $st.Add($cert) } finally { $st.Close() }
 
-        Write-Log '  导入驱动 ...'
-        $out = & "$env:SystemRoot\System32\pnputil.exe" -i -a $inf 2>&1
+        # 只放进驱动库（-a），不带 -i：-i 会把驱动强行装到所有对得上的设备上，店里插着、正用着的小票机会被换驱动、
+        # 重新认成新端口（USB001 → USB002），原来那台打印机就打不出来了（2026-11-04 门店反馈）。新插上的芯烨机 Windows 会自己从驱动库找
+        Write-Log '  导入驱动（只放进驱动库，不动已插着的打印机）...'
+        $out = & "$env:SystemRoot\System32\pnputil.exe" -a $inf 2>&1
         Write-Log ('  pnputil: ' + (($out | Where-Object { "$_".Trim() }) -join ' / '))
     }
 
@@ -571,6 +573,8 @@ function Invoke-StoreSetup {
             }
             $hasCmdlet = [bool](Get-Command Add-PrinterDriver -ErrorAction SilentlyContinue)
             foreach ($m in $models) {
+                # 已经装过的同名型号不再注册：会覆盖已有打印机正在用的驱动文件
+                if (Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Environments\$printEnv\Drivers\Version-3\$m") { Write-Log "  $m 已有，不动"; continue }
                 if ($hasCmdlet) {
                     try { Add-PrinterDriver -Name $m } catch { Write-Log "  $m 注册失败：$($_.Exception.Message)" Yellow }
                 } else {
