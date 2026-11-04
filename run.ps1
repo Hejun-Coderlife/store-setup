@@ -7,7 +7,7 @@
 
 function Invoke-StoreSetup {
     $ErrorActionPreference = 'Stop'
-    $Version = '2026.11.04'
+    $Version = '2026.11.04.1'
     $Dir = 'C:\ProgramData\StoreSetup'
     $Cache = Join-Path $env:TEMP 'StoreSetup'
     $Test = $env:STORESETUP_TEST -eq '1'
@@ -265,6 +265,8 @@ function Invoke-StoreSetup {
                 if (-not ([string]$i.GetValue('DisplayName') -match $pattern)) { continue }
                 $u = [string]$i.GetValue('UninstallString')
                 if ($u -match '^"([^"]+)"') { $u = $matches[1] }
+                # 卸载路径是空的残留记录（老版本没卸干净）跳过：Split-Path 空字符串会直接报错，整项被记成失败（2026-11-04 余姚泗门店）
+                if (-not $u.Trim()) { continue }
                 $dir = Split-Path $u
                 if (-not $dir -or -not (Test-Path $dir)) { continue }
                 foreach ($f in @(Get-ChildItem $dir -Filter *.exe -ErrorAction SilentlyContinue)) {
@@ -287,6 +289,8 @@ function Invoke-StoreSetup {
                 if ($n -notmatch $pattern) { continue }
                 $u = [string]$i.GetValue('UninstallString')
                 if ($u -match '^"([^"]+)"') { $u = $matches[1] }
+                # 卸载路径是空的残留记录（老版本没卸干净）跳过：Split-Path 空字符串会直接报错，整项被记成失败（2026-11-04 余姚泗门店）
+                if (-not $u.Trim()) { continue }
                 $dir = Split-Path $u
                 $name = ($n -replace '\s+[\d\.]+$', '').Trim()
                 if (-not $dir) { continue }
